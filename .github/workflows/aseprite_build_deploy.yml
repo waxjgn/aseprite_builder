@@ -117,7 +117,7 @@ jobs:
         if: matrix.os == 'windows-latest'
         working-directory: aseprite/build
         shell: pwsh
-        run: cmake -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -DCMAKE_IGNORE_PATH='C:/ProgramData/chocolatey/bin/;C:/Strawberry/c/bin/' -DLAF_BACKEND=skia -DSKIA_DIR="$(Convert-Path ../../skia)" -DSKIA_LIBRARY_DIR="$(Convert-Path ../../skia/out/Release-x64)" -DSKIA_LIBRARY="$(Convert-Path ../../skia/out/Release-x64/skia.lib)" -G Ninja ..
+        run: cmake -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -DCMAKE_IGNORE_PATH='C:/ProgramData/chocolatey/bin/;C:/Strawberry/c/bin/' -DLAF_BACKEND=skia -DSKIA_DIR="$(Convert-Path ../../skia)" -DSKIA_[...]
       - name: (Ubuntu) Run CMake
         if: matrix.os == 'ubuntu-latest'
         working-directory: aseprite/build
@@ -125,7 +125,7 @@ jobs:
       - name: (macOS) Run CMake
         if: matrix.os == 'macOS-latest'
         working-directory: aseprite/build
-        run: cmake -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -DCMAKE_OSX_ARCHITECTURES=x86_64 -DCMAKE_OSX_DEPLOYMENT_TARGET=10.9 -DCMAKE_OSX_SYSROOT=/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk -DLAF_BACKEND=skia -DSKIA_DIR=$(realpath ../../skia) -DSKIA_LIBRARY_DIR=$(realpath ../../skia/out/Release-x64) -G Ninja ..
+        run: cmake -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -DCMAKE_OSX_ARCHITECTURES=x86_64 -DCMAKE_OSX_DEPLOYMENT_TARGET=10.9 -DCMAKE_OSX_SYSROOT=/Applications/Xcode.app/Contents/Developer/Platforms[...]
       - name: Run Ninja
         working-directory: aseprite/build
         run: ninja aseprite
@@ -133,12 +133,60 @@ jobs:
         working-directory: aseprite/build/bin
         shell: bash
         run: rm -f gen modp_b64_gen gen.exe gen.exe.manifest modp_b64_gen.exe modp_b64_gen.exe.manifest
-      - name: (Windows) Make portable zip
+
+      # === 新增：把中文本地化/翻译文件包含到构建产物 ===
+      # 这里尝试从源码里常见的位置拷贝 locale/translation 文件到构建结果的 share/locale
+      - name: Include translations (try common source paths)
         working-directory: aseprite/build/bin
-        run: echo '# This file is here so Aseprite behaves as a portable program' > aseprite.ini
+        shell: bash
+        run: |
+          set -e
+          echo "Looking for locale/translation dirs to include..."
+          # 从源码常见位置复制到 build/bin/share/locale
+          mkdir -p share
+          # 如果源码里有 data/locales，复制为 share/locale
+          if [ -d ../../data/locales ]; then
+            echo "Found ../../data/locales -> copying to share/locale"
+            mkdir -p share/locale
+            cp -r ../../data/locales/* share/locale/ || true
+          fi
+          # 如果源码或解压后有 share/locale 之类的路径，复制过去
+          if [ -d ../../share/locale ]; then
+            echo "Found ../../share/locale -> copying to share/locale"
+            mkdir -p share/locale
+            cp -r ../../share/locale/* share/locale/ || true
+          fi
+          # 有些来源会把 locale 放在 aseprite/locale 或者 aseprite/translations
+          if [ -d ../../locale ]; then
+            echo "Found ../../locale -> copying to share/locale"
+            mkdir -p share/locale
+            cp -r ../../locale/* share/locale/ || true
+          fi
+          if [ -d ../../translations ]; then
+            echo "Found ../../translations -> copying to share/locale"
+            mkdir -p share/locale
+            cp -r ../../translations/* share/locale/ || true
+          fi
+          # 列出结果供调试
+          echo "Resulting share/locale contents:"
+          ls -la share/locale || echo "No locale files were copied."
+
+      # === 新增：创建 aseprite.ini 并设置默认语言为中文（简体 zh_CN） ===
+      # 便携版会读取同目录下的 aseprite.ini，language=zh_CN 会让 UI 尝试使用中文（前提是翻译文件存在）
+      - name: Create aseprite.ini (portable) and set language to Chinese
+        working-directory: aseprite/build/bin
+        shell: bash
+        run: |
+          echo '# This file is here so Aseprite behaves as a portable program' > aseprite.ini
+          echo 'language=zh_CN' >> aseprite.ini
+          # 记录一下当前目录方便调试
+          echo "Created aseprite.ini with language=zh_CN:"
+          cat aseprite.ini
+
       - name: Create release
         working-directory: aseprite/build/bin
         run: 7z -tzip a Aseprite-${{ needs.check-version.outputs.latest_tag }}-${{ runner.os }}.zip *
+
       - name: Upload release
         uses: actions/upload-release-asset@v1
         env:
